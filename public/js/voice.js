@@ -6,6 +6,11 @@
  *   2. Browser SpeechSynthesis API — fallback if Kokoro isn't running
  *
  * STT: Web Speech API (Chrome/Edge)
+ *
+ * Enhanced features:
+ * - Multiple voice options (Kokoro)
+ * - Speed control
+ * - Voice settings UI support
  */
 
 const Voice = (() => {
@@ -27,8 +32,19 @@ const Voice = (() => {
 
   // Kokoro TTS config
   const KOKORO_BASE = 'http://localhost:8880';
-  const KOKORO_VOICE = 'am_puck'; // Playful, energetic male — perfect for gaming buddy vibe
   let kokoroAvailable = null; // null = untested, true/false after check
+  let currentVoice = 'am_puck';
+  let currentSpeed = 1.1;
+
+  // Available Kokoro voices - male voices (best for CodeBot gaming buddy vibe)
+  const KOKORO_VOICES = {
+    'am_puck': { name: 'Puck', gender: 'male', description: 'Playful, energetic' },
+    'am_michael': { name: 'Michael', gender: 'male', description: 'Deep, confident' },
+    'am_ryan': { name: 'Ryan', gender: 'male', description: 'Warm, friendly' },
+    'bf_emma': { name: 'Emma', gender: 'female', description: 'British, warm' },
+    'bf_isabella': { name: 'Isabella', gender: 'female', description: 'British, elegant' },
+    'af_sarah': { name: 'Sarah', gender: 'female', description: 'American, clear' },
+  };
 
   // ===== INIT =====
   function init() {
@@ -40,19 +56,33 @@ const Voice = (() => {
     }
   }
 
-  // Check if Kokoro TTS is running
+  // Check if Kokoro TTS is running and get available voices
   async function checkKokoro() {
     try {
       const res = await fetch(`${KOKORO_BASE}/v1/models`, { signal: AbortSignal.timeout(2000) });
       if (res.ok) {
         kokoroAvailable = true;
         console.log('[Voice] Kokoro TTS available — using high-quality voice');
+        // Try to get available voices from Kokoro
+        fetchKokoroVoices();
       } else {
         kokoroAvailable = false;
       }
     } catch (e) {
       kokoroAvailable = false;
       console.log('[Voice] Kokoro TTS not found — falling back to browser voice');
+    }
+  }
+
+  async function fetchKokoroVoices() {
+    try {
+      const res = await fetch(`${KOKORO_BASE}/v1/voices`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        console.log('[Voice] Kokoro available voices:', data);
+      }
+    } catch (e) {
+      // Silently fail - we'll use our default voice list
     }
   }
 
@@ -234,9 +264,9 @@ const Voice = (() => {
         body: JSON.stringify({
           model: 'kokoro',
           input: text,
-          voice: KOKORO_VOICE,
+          voice: currentVoice,
           response_format: 'mp3',
-          speed: 1.1,
+          speed: currentSpeed,
         }),
       });
 
@@ -335,6 +365,35 @@ const Voice = (() => {
     return chunks;
   }
 
+  // ===== VOICE SETTINGS =====
+  function setVoice(voiceId) {
+    if (KOKORO_VOICES[voiceId]) {
+      currentVoice = voiceId;
+      console.log('[Voice] Voice changed to:', KOKORO_VOICES[voiceId].name);
+      if (onStatusCallback) onStatusCallback('voice_changed', voiceId);
+    }
+  }
+
+  function setSpeed(speed) {
+    // Clamp speed between 0.5 and 2.0
+    currentSpeed = Math.max(0.5, Math.min(2.0, speed));
+    console.log('[Voice] Speed changed to:', currentSpeed);
+    if (onStatusCallback) onStatusCallback('speed_changed', currentSpeed);
+  }
+
+  function getAvailableVoices() {
+    return { ...KOKORO_VOICES };
+  }
+
+  function getCurrentSettings() {
+    return {
+      voice: currentVoice,
+      voiceName: KOKORO_VOICES[currentVoice]?.name || currentVoice,
+      speed: currentSpeed,
+      engine: kokoroAvailable ? 'kokoro' : 'browser',
+    };
+  }
+
   // ===== PUBLIC API =====
   return {
     init,
@@ -346,6 +405,10 @@ const Voice = (() => {
     onQueueEmpty,
     clearQueue,
     stopSpeaking,
+    setVoice,
+    setSpeed,
+    getAvailableVoices,
+    getCurrentSettings,
     get isListening() { return isListening; },
     get isSpeaking() { return isSpeaking; },
     get isSupported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
