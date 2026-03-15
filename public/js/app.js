@@ -30,6 +30,7 @@
 
   let currentXP = 0;
   let currentLevel = 1;
+  let serverReady = false;
 
   // ===== INIT =====
   function init() {
@@ -42,6 +43,35 @@
     setupChatCallbacks();
     loadTheme();
     checkConnection();
+    setupStartScreen();
+  }
+
+  // ===== START SCREEN (unlocks audio) =====
+  function setupStartScreen() {
+    const startScreen = document.getElementById('start-screen');
+    if (!startScreen) return;
+
+    startScreen.addEventListener('click', () => {
+      // Play a silent audio to unlock browser audio context
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start(0);
+
+      // Fade out start screen
+      startScreen.style.transition = 'opacity 0.3s';
+      startScreen.style.opacity = '0';
+      setTimeout(() => startScreen.remove(), 300);
+
+      // Now trigger the greeting if server is ready
+      if (serverReady) {
+        setTimeout(() => {
+          Chat.send('Hi! I just opened CodeBot for the first time.');
+        }, 400);
+      }
+    }, { once: true });
   }
 
   // ===== EVENT LISTENERS =====
@@ -241,11 +271,8 @@
           true
         );
       } else {
-        // Everything is good — trigger CodeBot's opening greeting
-        // Send a hidden system-like message to start the assessment
-        setTimeout(() => {
-          Chat.send('Hi! I just opened CodeBot for the first time.');
-        }, 800);
+        // Server is good — mark ready, greeting will fire after start screen tap
+        serverReady = true;
       }
     } catch (err) {
       showConnectionBanner(
