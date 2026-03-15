@@ -12,6 +12,7 @@ const Editor = (() => {
   let pyodideLoading = false;
   let pyodideReady = false;
   let hasShownRunHint = false;
+  let onRunCompleteCallback = null;
 
   function init() {
     textarea = document.getElementById('code-editor');
@@ -171,9 +172,19 @@ sys.stderr = StringIO()
       if (!output) output = '✓ Code ran! No output to show (try adding a print statement).';
 
       showOutput(output);
+
+      // Notify app so CodeBot can react
+      if (onRunCompleteCallback) {
+        onRunCompleteCallback({ code, output, success: true });
+      }
     } catch (err) {
       const friendlyError = makeFriendlyError(err.message || String(err));
       showOutput(friendlyError);
+
+      // Notify app about the error too
+      if (onRunCompleteCallback) {
+        onRunCompleteCallback({ code, output: friendlyError, success: false });
+      }
     }
   }
 
@@ -236,5 +247,6 @@ sys.stderr = StringIO()
 
   return {
     init, setCode, getCode, clear, show, hide, toggle, isVisible, run,
+    onRunComplete(cb) { onRunCompleteCallback = cb; },
   };
 })();

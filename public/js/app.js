@@ -168,6 +168,26 @@
       Editor.setCode(code);
     });
 
+    // When Ryan runs code, auto-send result to CodeBot
+    Editor.onRunComplete(({ code, output, success }) => {
+      // Don't send if Chat is already streaming a response
+      if (Chat.isStreaming) return;
+
+      // Build a concise context message for CodeBot
+      const trimmedCode = code.length > 300 ? code.slice(0, 300) + '...' : code;
+      const trimmedOutput = output.length > 200 ? output.slice(0, 200) + '...' : output;
+
+      let msg;
+      if (success) {
+        msg = `[Ryan ran this code]\n${trimmedCode}\n[Output]\n${trimmedOutput}`;
+      } else {
+        msg = `[Ryan ran this code and got an error]\n${trimmedCode}\n[Error]\n${trimmedOutput}`;
+      }
+
+      // Small delay so the output panel settles first
+      setTimeout(() => Chat.send(msg), 600);
+    });
+
     Chat.onXPUpdate((xp, level) => {
       const gained = xp - currentXP;
       currentXP = xp;

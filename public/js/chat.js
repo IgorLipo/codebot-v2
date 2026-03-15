@@ -19,8 +19,13 @@ const Chat = (() => {
     if (!text.trim() || isStreaming) return;
     isStreaming = true;
 
-    // Add user bubble
-    addMessage('user', text);
+    // Detect auto-sent code run results — show a compact status instead of raw text
+    const isCodeResult = text.startsWith('[Ryan ran this code');
+    if (isCodeResult) {
+      addMessage('user', '▶ I ran the code');
+    } else {
+      addMessage('user', text);
+    }
 
     // Add bot placeholder with typing indicator
     const botEl = addMessage('bot', '', true);
