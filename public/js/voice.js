@@ -27,7 +27,7 @@ const Voice = (() => {
 
   // Kokoro TTS config
   const KOKORO_BASE = 'http://localhost:8880';
-  const KOKORO_VOICE = 'bf_emma'; // British female, warm and natural
+  const KOKORO_VOICE = 'am_puck'; // Playful, energetic male — perfect for gaming buddy vibe
   let kokoroAvailable = null; // null = untested, true/false after check
 
   // ===== INIT =====
@@ -236,7 +236,7 @@ const Voice = (() => {
           input: text,
           voice: KOKORO_VOICE,
           response_format: 'mp3',
-          speed: 1.05,
+          speed: 1.1,
         }),
       });
 
