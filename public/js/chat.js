@@ -9,6 +9,8 @@ const Chat = (() => {
   let onCodeDetected = null;
   let onXPUpdate = null;
   let onResponseComplete = null;
+  let onSentenceReady = null;
+  let spokenUpTo = 0; // Track how much text we've already sent to TTS
 
   function init(container) {
     messagesContainer = container;
@@ -44,6 +46,7 @@ const Chat = (() => {
       const decoder = new TextDecoder();
       let fullResponse = '';
       let buffer = '';
+      spokenUpTo = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -71,6 +74,11 @@ const Chat = (() => {
               fullResponse += data.token;
               renderBotContent(contentEl, fullResponse);
               scrollToBottom();
+
+              // Stream speech: send complete sentences to TTS as they arrive
+              if (onSentenceReady) {
+                flushSentences(fullResponse, false);
+              }
             }
 
             if (data.done) {
@@ -82,10 +90,15 @@ const Chat = (() => {
         }
       }
 
+      // Flush any remaining text that didn't end with punctuation
+      if (onSentenceReady) {
+        flushSentences(fullResponse, true);
+      }
+
       // Extract code blocks and send to editor
       extractAndSendCode(fullResponse);
 
-      // Signal response complete (for voice to read aloud)
+      // Signal response complete
       if (onResponseComplete) onResponseComplete(fullResponse);
 
     } catch (err) {
@@ -139,6 +152,40 @@ const Chat = (() => {
     return div.innerHTML;
   }
 
+  // Send complete sentences to TTS incrementally during streaming
+  function flushSentences(fullText, isFinal) {
+    // Strip code blocks before looking for sentences (don't speak code)
+    const cleaned = fullText.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]+`/g, '');
+
+    if (isFinal) {
+      // Send whatever is left
+      const remaining = cleaned.slice(spokenUpTo).trim();
+      if (remaining) {
+        onSentenceReady(remaining);
+        spokenUpTo = cleaned.length;
+      }
+      return;
+    }
+
+    // Find sentence boundaries (.!?) in the text beyond what we've already spoken
+    const unspoken = cleaned.slice(spokenUpTo);
+    const sentenceEnd = /[.!?]\s/g;
+    let match;
+    let lastEnd = 0;
+
+    while ((match = sentenceEnd.exec(unspoken)) !== null) {
+      lastEnd = match.index + match[0].length;
+    }
+
+    if (lastEnd > 0) {
+      const chunk = unspoken.slice(0, lastEnd).trim();
+      if (chunk) {
+        onSentenceReady(chunk);
+        spokenUpTo += lastEnd;
+      }
+    }
+  }
+
   function extractAndSendCode(text) {
     // Match ```code ... ``` or ```python ... ``` or ``` ... ```
     const codeBlockRegex = /```(?:code|python|py)?\s*\n?([\s\S]*?)```/g;
@@ -179,5 +226,6 @@ const Chat = (() => {
     onCodeDetected(cb) { onCodeDetected = cb; },
     onXPUpdate(cb) { onXPUpdate = cb; },
     onResponseComplete(cb) { onResponseComplete = cb; },
+    onSentenceReady(cb) { onSentenceReady = cb; },
   };
 })();

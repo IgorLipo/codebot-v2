@@ -196,10 +196,14 @@
       if (gained > 0) showXPPopup(gained);
     });
 
-    // When bot finishes responding, speak it aloud
-    Chat.onResponseComplete((text) => {
-      Voice.speak(text, () => {
-        // After speaking, hint to tap mic
+    // Stream speech: speak sentences as they arrive during streaming
+    Chat.onSentenceReady((sentence) => {
+      Voice.queueSpeak(sentence);
+    });
+
+    // When streaming is fully done, wait for speech queue to drain then show mic hint
+    Chat.onResponseComplete(() => {
+      Voice.onQueueEmpty(() => {
         if (Voice.isSupported) {
           if (voiceStatusText) voiceStatusText.textContent = 'Tap mic to reply';
           voiceStatus.classList.remove('hidden');

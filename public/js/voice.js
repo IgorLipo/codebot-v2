@@ -20,6 +20,11 @@ const Voice = (() => {
   let onStatusCallback = null;
   let currentAudio = null;
 
+  // Speech queue for streaming TTS
+  const speechQueue = [];
+  let isProcessingQueue = false;
+  let onQueueDrained = null; // Called when queue is empty and last item finishes
+
   // Kokoro TTS config
   const KOKORO_BASE = 'http://localhost:8880';
   const KOKORO_VOICE = 'bf_emma'; // British female, warm and natural
@@ -170,6 +175,54 @@ const Voice = (() => {
     }
   }
 
+  // Queue a sentence for streaming speech — sentences play in order
+  function queueSpeak(text) {
+    if (!text || !text.trim()) return;
+    const cleaned = text.replace(/[#*_~]/g, '').trim();
+    if (!cleaned) return;
+
+    speechQueue.push(cleaned);
+    if (!isProcessingQueue) {
+      processQueue();
+    }
+  }
+
+  // Process the speech queue one item at a time
+  async function processQueue() {
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
+
+    while (speechQueue.length > 0) {
+      const text = speechQueue.shift();
+      await new Promise((resolve) => {
+        if (kokoroAvailable) {
+          speakWithKokoro(text, resolve);
+        } else {
+          speakWithBrowser(text, resolve);
+        }
+      });
+    }
+
+    isProcessingQueue = false;
+    isSpeaking = false;
+    onQueueDrained?.();
+    onQueueDrained = null;
+  }
+
+  // Flush queue — called when streaming is done, fires callback after last sentence
+  function onQueueEmpty(cb) {
+    if (!isProcessingQueue && speechQueue.length === 0) {
+      cb?.();
+    } else {
+      onQueueDrained = cb;
+    }
+  }
+
+  function clearQueue() {
+    speechQueue.length = 0;
+    onQueueDrained = null;
+  }
+
   // ===== KOKORO TTS =====
   async function speakWithKokoro(text, onEnd) {
     isSpeaking = true;
@@ -254,6 +307,8 @@ const Voice = (() => {
 
   function stopSpeaking() {
     isSpeaking = false;
+    clearQueue();
+    isProcessingQueue = false;
     // Stop Kokoro audio
     if (currentAudio) {
       currentAudio.pause();
@@ -287,6 +342,9 @@ const Voice = (() => {
     stopListening,
     toggleListening,
     speak,
+    queueSpeak,
+    onQueueEmpty,
+    clearQueue,
     stopSpeaking,
     get isListening() { return isListening; },
     get isSpeaking() { return isSpeaking; },
