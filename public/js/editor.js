@@ -76,23 +76,40 @@ const Editor = (() => {
   function isVisible() { return panel && !panel.classList.contains('collapsed'); }
 
   // ===== PYODIDE PYTHON EXECUTION =====
-  async function loadPyodide() {
+  async function loadPyodideEnv() {
     if (pyodideReady || pyodideLoading) return;
     pyodideLoading = true;
     showOutput('⏳ Loading Python environment (first time only)...');
 
-    try {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js';
-      document.head.appendChild(script);
+    const PYODIDE_VERSION = '0.27.6';
+    const CDN_URLS = [
+      `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/pyodide.js`,
+      `https://cdnjs.cloudflare.com/ajax/libs/pyodide/${PYODIDE_VERSION}/pyodide.min.js`,
+    ];
 
-      await new Promise((resolve, reject) => {
-        script.onload = resolve;
-        script.onerror = reject;
-      });
+    try {
+      // Try each CDN until one works
+      let loaded = false;
+      for (const url of CDN_URLS) {
+        try {
+          const script = document.createElement('script');
+          script.src = url;
+          document.head.appendChild(script);
+          await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = reject;
+            setTimeout(reject, 15000); // 15s timeout per CDN
+          });
+          loaded = true;
+          break;
+        } catch (_) {
+          // Try next CDN
+        }
+      }
+      if (!loaded) throw new Error('All CDNs failed');
 
       pyodide = await loadPyodide({
-        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.1/full/',
+        indexURL: `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`,
       });
 
       // Patch input() to use browser prompt dialog
@@ -128,7 +145,7 @@ builtins.input = _patched_input
     show();
 
     if (!pyodideReady) {
-      await loadPyodide();
+      await loadPyodideEnv();
       if (!pyodideReady) return;
     }
 
