@@ -1,8 +1,11 @@
 /**
- * Voice module — Speech Recognition (STT) + Speech Synthesis (TTS)
- * Uses browser-native APIs — zero dependencies, fully offline TTS.
- * STT uses Web Speech API (Chrome/Edge send to Google; Safari has partial support).
- * For fully offline STT, users can install Whisper locally — see README.
+ * Voice module — Speech Recognition (STT) + Text-to-Speech (TTS)
+ *
+ * TTS priority:
+ *   1. Kokoro TTS (local Docker at localhost:8880) — near-human quality
+ *   2. Browser SpeechSynthesis API — fallback if Kokoro isn't running
+ *
+ * STT: Web Speech API (Chrome/Edge)
  */
 
 const Voice = (() => {
@@ -15,34 +18,49 @@ const Voice = (() => {
   let voicesLoaded = false;
   let onResultCallback = null;
   let onStatusCallback = null;
-  let autoRestartAfterSpeech = false;
+  let currentAudio = null;
+
+  // Kokoro TTS config
+  const KOKORO_BASE = 'http://localhost:8880';
+  const KOKORO_VOICE = 'bf_emma'; // British female, warm and natural
+  let kokoroAvailable = null; // null = untested, true/false after check
 
   // ===== INIT =====
   function init() {
     initRecognition();
-    loadVoices();
-    // Voices load asynchronously in some browsers
+    loadBrowserVoices();
+    checkKokoro();
     if (synth) {
-      synth.addEventListener('voiceschanged', loadVoices);
+      synth.addEventListener('voiceschanged', loadBrowserVoices);
     }
   }
 
-  function loadVoices() {
+  // Check if Kokoro TTS is running
+  async function checkKokoro() {
+    try {
+      const res = await fetch(`${KOKORO_BASE}/v1/models`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        kokoroAvailable = true;
+        console.log('[Voice] Kokoro TTS available — using high-quality voice');
+      } else {
+        kokoroAvailable = false;
+      }
+    } catch (e) {
+      kokoroAvailable = false;
+      console.log('[Voice] Kokoro TTS not found — falling back to browser voice');
+    }
+  }
+
+  function loadBrowserVoices() {
     if (!synth) return;
     const voices = synth.getVoices();
     if (voices.length === 0) return;
     voicesLoaded = true;
 
-    // Prefer a good English voice — prioritise natural-sounding ones
     const preferred = [
-      'Google UK English Male',
-      'Google UK English Female',
-      'Daniel',              // macOS
-      'Samantha',            // macOS
-      'Alex',                // macOS
-      'Karen',               // macOS AU
-      'Microsoft Ryan',      // Windows
-      'Microsoft Libby',     // Windows UK
+      'Google UK English Male', 'Google UK English Female',
+      'Daniel', 'Samantha', 'Karen', 'Alex',
+      'Microsoft Ryan', 'Microsoft Libby',
     ];
 
     for (const name of preferred) {
@@ -50,32 +68,29 @@ const Voice = (() => {
       if (match) { selectedVoice = match; break; }
     }
 
-    // Fallback: any English voice
     if (!selectedVoice) {
       selectedVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
     }
-
-    console.log(`[Voice] Selected TTS voice: ${selectedVoice?.name} (${selectedVoice?.lang})`);
+    console.log(`[Voice] Browser TTS voice: ${selectedVoice?.name}`);
   }
 
   // ===== SPEECH RECOGNITION (STT) =====
   function initRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      console.warn('[Voice] Speech Recognition not supported in this browser');
+      console.warn('[Voice] Speech Recognition not supported');
       return;
     }
 
     recognition = new SpeechRecognition();
-    recognition.continuous = false;      // Stop after one phrase
-    recognition.interimResults = true;   // Show partial results
-    recognition.lang = 'en-GB';          // British English for Ryan
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-GB';
     recognition.maxAlternatives = 1;
 
     recognition.onresult = (event) => {
       let finalText = '';
       let interimText = '';
-
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
@@ -84,28 +99,21 @@ const Voice = (() => {
           interimText += transcript;
         }
       }
-
-      if (finalText && onResultCallback) {
-        onResultCallback(finalText.trim(), true);
-      } else if (interimText && onResultCallback) {
-        onResultCallback(interimText.trim(), false);
-      }
+      if (finalText && onResultCallback) onResultCallback(finalText.trim(), true);
+      else if (interimText && onResultCallback) onResultCallback(interimText.trim(), false);
     };
 
     recognition.onerror = (event) => {
-      console.warn('[Voice] Recognition error:', event.error);
       if (event.error === 'no-speech' || event.error === 'aborted') {
-        // Not a real error — just no input detected
         setListening(false);
         return;
       }
+      console.warn('[Voice] Recognition error:', event.error);
       setListening(false);
       if (onStatusCallback) onStatusCallback('error', event.error);
     };
 
-    recognition.onend = () => {
-      setListening(false);
-    };
+    recognition.onend = () => setListening(false);
   }
 
   function startListening() {
@@ -113,16 +121,11 @@ const Voice = (() => {
       if (onStatusCallback) onStatusCallback('unsupported');
       return;
     }
-    // Stop TTS if speaking
-    if (isSpeaking) {
-      synth.cancel();
-      isSpeaking = false;
-    }
+    stopSpeaking(); // Stop TTS if playing
     try {
       recognition.start();
       setListening(true);
     } catch (e) {
-      // Already started — restart
       recognition.stop();
       setTimeout(() => {
         try { recognition.start(); setListening(true); } catch (_) {}
@@ -138,11 +141,7 @@ const Voice = (() => {
   }
 
   function toggleListening() {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
+    isListening ? stopListening() : startListening();
   }
 
   function setListening(val) {
@@ -150,14 +149,11 @@ const Voice = (() => {
     if (onStatusCallback) onStatusCallback(val ? 'listening' : 'idle');
   }
 
-  // ===== SPEECH SYNTHESIS (TTS) =====
+  // ===== TEXT-TO-SPEECH =====
   function speak(text, onEnd) {
-    if (!synth || !text) { onEnd?.(); return; }
+    if (!text) { onEnd?.(); return; }
 
-    // Cancel any ongoing speech
-    synth.cancel();
-
-    // Strip code blocks — don't read code aloud
+    // Clean text for speech — strip code blocks and markdown
     const cleaned = text
       .replace(/```[\s\S]*?```/g, '... check the code editor ...')
       .replace(/`[^`]+`/g, (m) => m.replace(/`/g, ''))
@@ -166,8 +162,71 @@ const Voice = (() => {
 
     if (!cleaned) { onEnd?.(); return; }
 
-    // Split into chunks (some browsers have a ~200 char limit per utterance)
-    const chunks = splitIntoChunks(cleaned, 180);
+    // Try Kokoro first, fall back to browser
+    if (kokoroAvailable) {
+      speakWithKokoro(cleaned, onEnd);
+    } else {
+      speakWithBrowser(cleaned, onEnd);
+    }
+  }
+
+  // ===== KOKORO TTS =====
+  async function speakWithKokoro(text, onEnd) {
+    isSpeaking = true;
+
+    try {
+      const res = await fetch(`${KOKORO_BASE}/v1/audio/speech`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'kokoro',
+          input: text,
+          voice: KOKORO_VOICE,
+          response_format: 'mp3',
+          speed: 1.05,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Kokoro error: ${res.status}`);
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+      }
+
+      currentAudio = new Audio(url);
+      currentAudio.onended = () => {
+        isSpeaking = false;
+        URL.revokeObjectURL(url);
+        currentAudio = null;
+        onEnd?.();
+      };
+      currentAudio.onerror = () => {
+        isSpeaking = false;
+        URL.revokeObjectURL(url);
+        currentAudio = null;
+        // Fallback to browser on error
+        speakWithBrowser(text, onEnd);
+      };
+      currentAudio.play();
+
+    } catch (err) {
+      console.warn('[Voice] Kokoro failed, falling back to browser TTS:', err.message);
+      kokoroAvailable = false; // Don't retry Kokoro this session
+      isSpeaking = false;
+      speakWithBrowser(text, onEnd);
+    }
+  }
+
+  // ===== BROWSER SPEECHSYNTHESIS (FALLBACK) =====
+  function speakWithBrowser(text, onEnd) {
+    if (!synth) { onEnd?.(); return; }
+    synth.cancel();
+
+    const chunks = splitIntoChunks(text, 180);
     let index = 0;
     isSpeaking = true;
 
@@ -180,19 +239,12 @@ const Voice = (() => {
 
       const utterance = new SpeechSynthesisUtterance(chunks[index]);
       if (selectedVoice) utterance.voice = selectedVoice;
-      utterance.rate = 1.05;   // Slightly faster for a young audience
+      utterance.rate = 1.05;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
 
-      utterance.onend = () => {
-        index++;
-        speakNext();
-      };
-      utterance.onerror = (e) => {
-        console.warn('[Voice] TTS error:', e.error);
-        isSpeaking = false;
-        onEnd?.();
-      };
+      utterance.onend = () => { index++; speakNext(); };
+      utterance.onerror = () => { isSpeaking = false; onEnd?.(); };
 
       synth.speak(utterance);
     }
@@ -201,15 +253,21 @@ const Voice = (() => {
   }
 
   function stopSpeaking() {
-    if (synth) synth.cancel();
     isSpeaking = false;
+    // Stop Kokoro audio
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.onended = null;
+      currentAudio = null;
+    }
+    // Stop browser speech
+    if (synth) synth.cancel();
   }
 
   function splitIntoChunks(text, maxLen) {
     const sentences = text.match(/[^.!?]+[.!?]?\s*/g) || [text];
     const chunks = [];
     let current = '';
-
     for (const sentence of sentences) {
       if ((current + sentence).length > maxLen && current) {
         chunks.push(current.trim());
@@ -234,6 +292,7 @@ const Voice = (() => {
     get isSpeaking() { return isSpeaking; },
     get isSupported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
     get ttsSupported() { return !!window.speechSynthesis; },
+    get usingKokoro() { return kokoroAvailable === true; },
     onResult(cb) { onResultCallback = cb; },
     onStatus(cb) { onStatusCallback = cb; },
   };

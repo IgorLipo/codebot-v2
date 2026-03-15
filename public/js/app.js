@@ -42,16 +42,10 @@
     setupChatCallbacks();
     loadTheme();
     checkConnection();
-
-    // Auto-greet: send a blank to trigger CodeBot's intro
-    setTimeout(() => {
-      Chat.send("Hey CodeBot! I'm Ryan. Let's go!");
-    }, 500);
   }
 
   // ===== EVENT LISTENERS =====
   function setupEventListeners() {
-    // Send message
     sendBtn.addEventListener('click', sendTextMessage);
     textInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -60,7 +54,6 @@
       }
     });
 
-    // Auto-resize text input
     textInput.addEventListener('input', () => {
       textInput.style.height = 'auto';
       textInput.style.height = Math.min(textInput.scrollHeight, 120) + 'px';
@@ -92,11 +85,11 @@
         currentLevel = 1;
         updateXPDisplay();
         Editor.clear();
-        Chat.send("Hey CodeBot! I'm Ryan. Starting fresh!");
+        // Trigger CodeBot's assessment greeting
+        Chat.send('Hi! I just started CodeBot for the first time.');
       }
     });
 
-    // Connection banner dismiss
     connectionDismiss?.addEventListener('click', () => {
       connectionBanner.classList.add('hidden');
     });
@@ -106,11 +99,9 @@
   function setupVoiceCallbacks() {
     Voice.onResult((text, isFinal) => {
       if (isFinal) {
-        // Show what was said, then send
         textInput.value = '';
         Chat.send(text);
       } else {
-        // Show interim text
         textInput.value = text;
       }
     });
@@ -143,12 +134,10 @@
 
   // ===== CHAT CALLBACKS =====
   function setupChatCallbacks() {
-    // When code is detected in bot response, push to editor
     Chat.onCodeDetected((code) => {
       Editor.setCode(code);
     });
 
-    // When XP updates from server
     Chat.onXPUpdate((xp, level) => {
       const gained = xp - currentXP;
       currentXP = xp;
@@ -157,12 +146,10 @@
       if (gained > 0) showXPPopup(gained);
     });
 
-    // When bot finishes responding, speak it
+    // When bot finishes responding, speak it aloud
     Chat.onResponseComplete((text) => {
-      // Auto-speak the response
       Voice.speak(text, () => {
-        // After speaking, show a subtle "tap mic to reply" hint
-        // Only if voice is supported
+        // After speaking, hint to tap mic
         if (Voice.isSupported) {
           if (voiceStatusText) voiceStatusText.textContent = 'Tap mic to reply';
           voiceStatus.classList.remove('hidden');
@@ -181,15 +168,13 @@
     textInput.value = '';
     textInput.style.height = 'auto';
     Chat.send(text);
-    // Stop listening if active
     if (Voice.isListening) Voice.stopListening();
   }
 
-  // ===== XP DISPLAY =====
+  // ===== XP =====
   function updateXPDisplay() {
     if (xpValueEl) xpValueEl.textContent = currentXP;
     if (levelValueEl) levelValueEl.textContent = currentLevel;
-
     const xpInLevel = currentXP % 1000;
     const percent = (xpInLevel / 1000) * 100;
     if (xpBarFill) xpBarFill.style.width = percent + '%';
@@ -218,11 +203,7 @@
   }
 
   // ===== THEME =====
-  function loadTheme() {
-    // Default to dark
-    const saved = 'dark'; // No localStorage in sandbox — always start dark
-    applyTheme(saved);
-  }
+  function loadTheme() { applyTheme('dark'); }
 
   function toggleTheme() {
     const current = document.documentElement.getAttribute('data-theme');
@@ -230,13 +211,11 @@
   }
 
   function applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '');
     if (theme === 'light') {
       document.documentElement.setAttribute('data-theme', 'light');
     } else {
       document.documentElement.removeAttribute('data-theme');
     }
-    // Toggle icons
     const sun = document.getElementById('theme-icon-sun');
     const moon = document.getElementById('theme-icon-moon');
     if (sun && moon) {
@@ -261,6 +240,12 @@
           `Model "${data.model}" not found. Run "ollama pull ${data.model}" first.`,
           true
         );
+      } else {
+        // Everything is good — trigger CodeBot's opening greeting
+        // Send a hidden system-like message to start the assessment
+        setTimeout(() => {
+          Chat.send('Hi! I just opened CodeBot for the first time.');
+        }, 800);
       }
     } catch (err) {
       showConnectionBanner(
