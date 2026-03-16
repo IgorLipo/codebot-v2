@@ -30,9 +30,11 @@ const Voice = (() => {
   let isProcessingQueue = false;
   let onQueueDrained = null; // Called when queue is empty and last item finishes
 
-  // Kokoro TTS config
+  // TTS config - Currently using Kokoro (port 8880)
+  // Chatterbox available when library bug is fixed
+  const TTS_ENGINE = 'kokoro'; // 'kokoro' or 'chatterbox'
   const KOKORO_BASE = 'http://localhost:8880';
-  let kokoroAvailable = null; // null = untested, true/false after check
+  const CHATTERBOX_BASE = 'http://localhost:4123';
   let currentVoice = 'am_puck';
   let currentSpeed = 1.1;
 
